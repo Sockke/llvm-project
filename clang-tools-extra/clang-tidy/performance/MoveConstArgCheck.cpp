@@ -48,16 +48,40 @@ void MoveConstArgCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(MoveCallMatcher, this);
 
   Finder->addMatcher(
+      returnStmt(
+          hasReturnValue(anyOf(
+              ignoringImplicit(ignoringParenCasts(MoveCallMatcher)),
+              cxxConstructExpr(hasDeclaration(cxxConstructorDecl(allOf(
+                                   isUserProvided(), isMoveConstructor()))),
+                               hasAnyArgument(ignoringImplicit(
+                                   ignoringParenCasts(MoveCallMatcher)))))))
+          .bind("return-call-move"),
+      this);
+
+  Finder->addMatcher(
       invocation(forEachArgumentWithParam(
                      MoveCallMatcher,
-                     parmVarDecl(hasType(references(isConstQualified())))))
+                     parmVarDecl(anyOf(hasType(references(isConstQualified())),
+                                       hasType(rValueReferenceType())))
+                         .bind("invocation-parm")))
           .bind("receiving-expr"),
       this);
 }
 
 void MoveConstArgCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *CallMove = Result.Nodes.getNodeAs<CallExpr>("call-move");
+  const auto *ReturnCallMove =
+      Result.Nodes.getNodeAs<ReturnStmt>("return-call-move");
   const auto *ReceivingExpr = Result.Nodes.getNodeAs<Expr>("receiving-expr");
+  const auto *InvocationParm =
+      Result.Nodes.getNodeAs<ParmVarDecl>("invocation-parm");
+
+  if (!ReturnCallMove && !ReceivingExpr && HasCheckedMoveSet.count(CallMove))
+    return;
+
+  if (ReturnCallMove || ReceivingExpr)
+    HasCheckedMoveSet.insert(CallMove);
+
   const Expr *Arg = CallMove->getArg(0);
   SourceManager &SM = Result.Context->getSourceManager();
 
@@ -90,23 +114,51 @@ void MoveConstArgCheck::check(const MatchFinder::MatchResult &Result) {
       return;
 
     bool IsVariable = isa<DeclRefExpr>(Arg);
+    bool IsInvocationArg = false;
+    StringRef FuncName;
     const auto *Var =
         IsVariable ? dyn_cast<DeclRefExpr>(Arg)->getDecl() : nullptr;
-    auto Diag = diag(FileMoveRange.getBegin(),
-                     "std::move of the %select{|const }0"
-                     "%select{expression|variable %4}1 "
-                     "%select{|of the trivially-copyable type %5 }2"
-                     "has no effect; remove std::move()"
-                     "%select{| or make the variable non-const}3")
-                << IsConstArg << IsVariable << IsTriviallyCopyable
-                << (IsConstArg && IsVariable && !IsTriviallyCopyable) << Var
-                << Arg->getType();
+    if (ReceivingExpr &&
+        InvocationParm->getOriginalType()->isRValueReferenceType() &&
+        !ReceivingExpr->getType()->isRecordType() && Arg->isLValue()) {
+      IsInvocationArg = true;
+      const auto *ReceivingCallExpr = dyn_cast<CallExpr>(ReceivingExpr);
+      if (!ReceivingCallExpr)
+        return;
+      const auto *FD = ReceivingCallExpr->getDirectCallee();
+      FuncName = FD->getName();
+    }
+    auto Diag =
+        diag(FileMoveRange.getBegin(),
+             "std::move of the %select{|const }0"
+             "%select{expression|variable %5}1 "
+             "%select{|of the trivially-copyable type %6 }2"
+             "has no effect; %select{remove std::move()|}3"
+             "%select{| or make the variable non-const}4"
+             "%select{|consider changing %7's parameter from %6&& to %6&}3")
+        << IsConstArg << IsVariable << IsTriviallyCopyable << IsInvocationArg
+        << (IsConstArg && IsVariable && !IsTriviallyCopyable &&
+            !IsInvocationArg)
+        << Var << Arg->getType() << FuncName;
 
-    replaceCallWithArg(CallMove, Diag, SM, getLangOpts());
-  } else if (ReceivingExpr) {
-    auto Diag = diag(FileMoveRange.getBegin(),
-                     "passing result of std::move() as a const reference "
-                     "argument; no move will actually happen");
+    if (!IsInvocationArg)
+      replaceCallWithArg(CallMove, Diag, SM, getLangOpts());
+  } else if (ReturnCallMove || ReceivingExpr) {
+    if (ReceivingExpr &&
+        InvocationParm->getOriginalType()->isRValueReferenceType() &&
+        Arg->isLValue())
+      return;
+
+    bool IsMoveConstruct = false;
+    if (ReturnCallMove ||
+        InvocationParm->getOriginalType()->isRValueReferenceType())
+      IsMoveConstruct = true;
+    auto Diag =
+        diag(FileMoveRange.getBegin(),
+             "%select{passing result of std::move() as a const reference "
+             "argument; no move will actually happen|it's superfluous; a move "
+             "will happen, with or without the std::move}0")
+        << IsMoveConstruct;
 
     replaceCallWithArg(CallMove, Diag, SM, getLangOpts());
   }

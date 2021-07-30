@@ -70,7 +70,11 @@ int *f3(int *x3) {
   // CHECK-FIXES: return x3;
 }
 
-A f4(A x4) { return std::move(x4); }
+A f4(A x4) { 
+  return std::move(x4); 
+  // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: it's superfluous; a move will happen, with or without the std::move
+  // CHECK-FIXES: return x4;
+}
 
 A f5(const A x5) {
   return std::move(x5);
@@ -245,4 +249,74 @@ void lambda2() {
     callback(std::move(m));
   };
   f(MoveSemantics());
+}
+
+void showInt(int &&) {}
+int testInt() {
+  int a = 10;
+  int b = std::move(a);
+  // CHECK-MESSAGES: :[[@LINE-1]]:11: warning: std::move of the variable 'a' of the trivially-copyable type 'int' has no effect; remove std::move()
+  // CHECK-FIXES: int b = a;
+  showInt(std::move(a));
+  // CHECK-MESSAGES: :[[@LINE-1]]:11: warning: std::move of the variable 'a' of the trivially-copyable type 'int' has no effect; consider changing showInt's parameter from 'int'&& to 'int'&
+  return std::move(a);
+  // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: std::move of the variable 'a' of the trivially-copyable type 'int' has no effect; remove std::move()
+  // CHECK-FIXES: return a;
+}
+
+struct Tmp {};
+void showTmp(Tmp &&) {}
+Tmp testTmp() {
+  Tmp t;
+  Tmp t1 = std::move(t);
+  // CHECK-MESSAGES: :[[@LINE-1]]:12: warning: std::move of the variable 't' of the trivially-copyable type 'Tmp' has no effect; remove std::move()
+  // CHECK-FIXES: Tmp t1 = t;
+  Tmp t2 = std::move(Tmp());
+  // CHECK-MESSAGES: :[[@LINE-1]]:12: warning: std::move of the expression of the trivially-copyable type 'Tmp' has no effect; remove std::move()
+  // CHECK-FIXES: Tmp t2 = Tmp();
+  showTmp(std::move(t));
+  // CHECK-MESSAGES: :[[@LINE-1]]:11: warning: std::move of the variable 't' of the trivially-copyable type 'Tmp' has no effect; consider changing showTmp's parameter from 'Tmp'&& to 'Tmp'&
+  return std::move(t);
+  // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: std::move of the variable 't' of the trivially-copyable type 'Tmp' has no effect; remove std::move()
+  // CHECK-FIXES: return t;
+}
+
+struct Tmp_UnTriviallyC {
+  Tmp_UnTriviallyC() {}
+  Tmp_UnTriviallyC(const Tmp_UnTriviallyC &) {}
+};
+void showTmp_UnTriviallyC(Tmp_UnTriviallyC &&) {}
+Tmp_UnTriviallyC testTmp_UnTriviallyC() {
+  Tmp_UnTriviallyC tn;
+  Tmp_UnTriviallyC tn1 = std::move(tn);
+  // CHECK-MESSAGES: :[[@LINE-1]]:26: warning: passing result of std::move() as a const reference argument; no move will actually happen
+  // CHECK-FIXES: Tmp_UnTriviallyC tn1 = tn;
+  Tmp_UnTriviallyC tn2 = std::move(Tmp_UnTriviallyC());
+  // CHECK-MESSAGES: :[[@LINE-1]]:26: warning: passing result of std::move() as a const reference argument; no move will actually happen
+  // CHECK-FIXES: Tmp_UnTriviallyC tn2 = Tmp_UnTriviallyC();
+  showTmp_UnTriviallyC(std::move(tn));
+  // Expect no warning given here.
+  return std::move(tn);
+  // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: passing result of std::move() as a const reference argument; no move will actually happen 
+  // CHECK-FIXES: return tn;
+}
+
+struct Tmp_UnTriviallyCR {
+  Tmp_UnTriviallyCR() {}
+  Tmp_UnTriviallyCR(const Tmp_UnTriviallyCR &) {}
+  Tmp_UnTriviallyCR(Tmp_UnTriviallyCR &&) {}
+};
+void showTmp_UnTriviallyCR(Tmp_UnTriviallyCR &&) {}
+Tmp_UnTriviallyCR testTmp_UnTriviallyCR() {
+  Tmp_UnTriviallyCR tnr;
+  Tmp_UnTriviallyCR tnr1 = std::move(tnr);
+  // Expect no warning given here.
+  Tmp_UnTriviallyCR tnr2 = std::move(Tmp_UnTriviallyCR());
+  // CHECK-MESSAGES: :[[@LINE-1]]:28: warning: it's superfluous; a move will happen, with or without the std::move
+  // CHECK-FIXES: Tmp_UnTriviallyCR tnr2 = Tmp_UnTriviallyCR();
+  showTmp_UnTriviallyCR(std::move(tnr));
+  // Expect no warning given here.
+  return std::move(tnr);
+  // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: it's superfluous; a move will happen, with or without the std::move
+  // CHECK-FIXES: return tnr;
 }
