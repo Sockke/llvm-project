@@ -407,8 +407,15 @@ void ProTypeMemberInitCheck::checkMissingMemberInitializer(
     if (!F->hasInClassInitializer() &&
         utils::type_traits::isTriviallyDefaultConstructible(F->getType(),
                                                             Context) &&
-        !isEmpty(Context, F->getType()) && !F->isUnnamedBitfield())
-      FieldsToInit.insert(F);
+        !isEmpty(Context, F->getType()) && !F->isUnnamedBitfield()) {
+      SourceLocation SL =
+          getLocationForEndOfToken(Context, F->getSourceRange().getEnd());
+      unsigned ID = SL.getRawEncoding();
+      if (HasRecordClassMembers.find(ID) == HasRecordClassMembers.end()) {
+        HasRecordClassMembers.insert(ID);
+        FieldsToInit.insert(F);
+      }
+    }
   });
   if (FieldsToInit.empty())
     return;
