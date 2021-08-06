@@ -10,7 +10,7 @@
 #define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_CPPCOREGUIDELINES_PRO_TYPE_MEMBER_INIT_H
 
 #include "../ClangTidyCheck.h"
-#include <unordered_set>
+#include "llvm/ADT/DenseSet.h"
 
 namespace clang {
 namespace tidy {
@@ -76,7 +76,7 @@ private:
 
   // Record the member variables that have been initialized to prevent repeated
   // initialization.
-  std::unordered_set<unsigned> HasRecordClassMembers;
+  llvm::DenseSet<const FieldDecl *> HasRecordClasMemberSet;
 };
 
 } // namespace cppcoreguidelines

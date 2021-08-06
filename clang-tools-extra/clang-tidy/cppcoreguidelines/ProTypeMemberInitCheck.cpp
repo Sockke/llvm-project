@@ -13,6 +13,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Lex/Lexer.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
 using namespace clang::ast_matchers;
@@ -407,15 +408,8 @@ void ProTypeMemberInitCheck::checkMissingMemberInitializer(
     if (!F->hasInClassInitializer() &&
         utils::type_traits::isTriviallyDefaultConstructible(F->getType(),
                                                             Context) &&
-        !isEmpty(Context, F->getType()) && !F->isUnnamedBitfield()) {
-      SourceLocation SL =
-          getLocationForEndOfToken(Context, F->getSourceRange().getEnd());
-      unsigned ID = SL.getRawEncoding();
-      if (HasRecordClassMembers.find(ID) == HasRecordClassMembers.end()) {
-        HasRecordClassMembers.insert(ID);
-        FieldsToInit.insert(F);
-      }
-    }
+        !isEmpty(Context, F->getType()) && !F->isUnnamedBitfield())
+      FieldsToInit.insert(F);
   });
   if (FieldsToInit.empty())
     return;
@@ -441,16 +435,24 @@ void ProTypeMemberInitCheck::checkMissingMemberInitializer(
 
   // Collect all the fields we need to initialize, including indirect fields.
   SmallPtrSet<const FieldDecl *, 16> AllFieldsToInit;
-  forEachField(ClassDecl, FieldsToInit,
-               [&](const FieldDecl *F) { AllFieldsToInit.insert(F); });
-  if (AllFieldsToInit.empty())
+  forEachField(ClassDecl, FieldsToInit, [&](const FieldDecl *F) {
+    if (!HasRecordClasMemberSet.count(F)) {
+      AllFieldsToInit.insert(F);
+      HasRecordClasMemberSet.insert(F);
+    }
+  });
+
+  if (FieldsToInit.empty())
     return;
 
   DiagnosticBuilder Diag =
       diag(Ctor ? Ctor->getBeginLoc() : ClassDecl.getLocation(),
            "%select{|union }0constructor %select{does not|should}0 initialize "
            "%select{|one of }0these fields: %1")
-      << IsUnion << toCommaSeparatedString(OrderedFields, AllFieldsToInit);
+      << IsUnion << toCommaSeparatedString(OrderedFields, FieldsToInit);
+
+  if (AllFieldsToInit.empty())
+    return;
 
   // Do not propose fixes for constructors in macros since we cannot place them
   // correctly.
@@ -460,7 +462,8 @@ void ProTypeMemberInitCheck::checkMissingMemberInitializer(
   // Collect all fields but only suggest a fix for the first member of unions,
   // as initializing more than one union member is an error.
   SmallPtrSet<const FieldDecl *, 16> FieldsToFix;
-  SmallPtrSet<const RecordDecl *, 4> UnionsSeen;
+  llvm::DenseMap<const RecordDecl *, const FieldDecl *> NeedInitFieldInUnion;
+  // const FieldDecl *NeedInitFieldInUnion = nullptr;
   forEachField(ClassDecl, OrderedFields, [&](const FieldDecl *F) {
     if (!FieldsToInit.count(F))
       return;
@@ -470,9 +473,20 @@ void ProTypeMemberInitCheck::checkMissingMemberInitializer(
     if (F->getType()->isEnumeralType() ||
         (!getLangOpts().CPlusPlus20 && F->isBitField()))
       return;
-    if (!F->getParent()->isUnion() || UnionsSeen.insert(F->getParent()).second)
+    if (!F->getParent()->isUnion())
       FieldsToFix.insert(F);
+    else if ((NeedInitFieldInUnion.find(F->getParent()) ==
+              NeedInitFieldInUnion.end()) ||
+             (Context.getTypeSize(F->getType()) >
+              Context.getTypeSize(
+                  NeedInitFieldInUnion[F->getParent()]->getType())))
+      NeedInitFieldInUnion[F->getParent()] = F;
   });
+
+  for (const auto &RV : NeedInitFieldInUnion) {
+    FieldsToFix.insert(RV.second);
+  }
+
   if (FieldsToFix.empty())
     return;
 

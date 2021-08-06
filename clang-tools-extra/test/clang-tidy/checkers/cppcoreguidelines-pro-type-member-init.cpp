@@ -210,7 +210,7 @@ struct PositiveMultipleConstructors {
 
   // FIXME: The fix-its here collide providing an erroneous fix
   int A, B;
-  // CHECK-FIXES: int A{}{}{}, B{}{}{};
+  // CHECK-FIXES: int A{}, B{};
 };
 
 typedef struct {
