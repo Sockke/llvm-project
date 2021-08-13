@@ -50,7 +50,9 @@ void MoveConstArgCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(
       invocation(forEachArgumentWithParam(
                      MoveCallMatcher,
-                     parmVarDecl(hasType(references(isConstQualified())))))
+                     parmVarDecl(anyOf(hasType(references(isConstQualified())),
+                                       hasType(rValueReferenceType())))
+                         .bind("invocation-parm")))
           .bind("receiving-expr"),
       this);
 }
@@ -58,6 +60,15 @@ void MoveConstArgCheck::registerMatchers(MatchFinder *Finder) {
 void MoveConstArgCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *CallMove = Result.Nodes.getNodeAs<CallExpr>("call-move");
   const auto *ReceivingExpr = Result.Nodes.getNodeAs<Expr>("receiving-expr");
+  const auto *InvocationParm =
+      Result.Nodes.getNodeAs<ParmVarDecl>("invocation-parm");
+
+  if (!ReceivingExpr && HasCheckedMoveSet.contains(CallMove))
+    return;
+
+  if (ReceivingExpr)
+    HasCheckedMoveSet.insert(CallMove);
+
   const Expr *Arg = CallMove->getArg(0);
   SourceManager &SM = Result.Context->getSourceManager();
 
@@ -90,20 +101,57 @@ void MoveConstArgCheck::check(const MatchFinder::MatchResult &Result) {
       return;
 
     bool IsVariable = isa<DeclRefExpr>(Arg);
+    bool IsRValueReferenceArg = false;
+    bool IsTemplateInstantiation = false;
+    StringRef FuncName;
+    QualType ParmType;
+    std::string ExpectParmTypeName;
     const auto *Var =
         IsVariable ? dyn_cast<DeclRefExpr>(Arg)->getDecl() : nullptr;
+
+    if (ReceivingExpr &&
+        InvocationParm->getOriginalType()->isRValueReferenceType() &&
+        !ReceivingExpr->getType()->isRecordType() && Arg->isLValue()) {
+      IsRValueReferenceArg = true;
+      const auto *ReceivingCallExpr = dyn_cast<CallExpr>(ReceivingExpr);
+      if (!ReceivingCallExpr)
+        return;
+      IsTemplateInstantiation =
+          ReceivingCallExpr->getDirectCallee()->isTemplateInstantiation();
+      FuncName = ReceivingCallExpr->getDirectCallee()->getName();
+      ParmType = InvocationParm->getOriginalType();
+      if (Arg->getType()->isRecordType()) {
+        if (const CXXRecordDecl *R = Arg->getType()->getAsCXXRecordDecl())
+          ExpectParmTypeName = R->getNameAsString();
+      } else
+        ExpectParmTypeName =
+            Arg->getType().getAtomicUnqualifiedType().getAsString();
+    }
+
     auto Diag = diag(FileMoveRange.getBegin(),
                      "std::move of the %select{|const }0"
-                     "%select{expression|variable %4}1 "
-                     "%select{|of the trivially-copyable type %5 }2"
-                     "has no effect; remove std::move()"
-                     "%select{| or make the variable non-const}3")
+                     "%select{expression|variable %5}1 "
+                     "%select{|of the trivially-copyable type %6 }2"
+                     "has no effect%select{; remove std::move()||; consider "
+                     "changing %7's parameter from %8 to 'const %9 &'}3"
+                     "%select{| or make the variable non-const}4")
                 << IsConstArg << IsVariable << IsTriviallyCopyable
-                << (IsConstArg && IsVariable && !IsTriviallyCopyable) << Var
-                << Arg->getType();
+                << (IsRValueReferenceArg + (IsRValueReferenceArg &&
+                                            IsTriviallyCopyable &&
+                                            !IsTemplateInstantiation))
+                << (IsConstArg && IsVariable && !IsTriviallyCopyable &&
+                    !IsRValueReferenceArg)
+                << Var << Arg->getType() << FuncName << ParmType
+                << ExpectParmTypeName;
+
+    if (IsRValueReferenceArg)
+      return;
 
     replaceCallWithArg(CallMove, Diag, SM, getLangOpts());
   } else if (ReceivingExpr) {
+    if (InvocationParm->getOriginalType()->isRValueReferenceType())
+      return;
+
     auto Diag = diag(FileMoveRange.getBegin(),
                      "passing result of std::move() as a const reference "
                      "argument; no move will actually happen");

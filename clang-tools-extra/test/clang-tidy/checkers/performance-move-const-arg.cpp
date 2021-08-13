@@ -246,3 +246,27 @@ void lambda2() {
   };
   f(MoveSemantics());
 }
+
+void showInt(int &&) {}
+void testInt() {
+  int a = 10;
+  showInt(std::move(a));
+  // CHECK-MESSAGES: :[[@LINE-1]]:11: warning: std::move of the variable 'a' of the trivially-copyable type 'int' has no effect; consider changing showInt's parameter from 'int &&' to 'const int &'
+}
+template <class T>
+void forwardToShowInt(T &&t) {
+  showInt(static_cast<T &&>(t));
+}
+void testTemplate() {
+  int a = 10;
+  forwardToShowInt(std::move(a));
+  // CHECK-MESSAGES: :[[@LINE-1]]:20: warning: std::move of the variable 'a' of the trivially-copyable type 'int' has no effect
+}
+
+struct Tmp {};
+void showTmp(Tmp &&) {}
+void testTmp() {
+  Tmp t;
+  showTmp(std::move(t));
+  // CHECK-MESSAGES: :[[@LINE-1]]:11: warning: std::move of the variable 't' of the trivially-copyable type 'Tmp' has no effect; consider changing showTmp's parameter from 'Tmp &&' to 'const Tmp &'
+}
