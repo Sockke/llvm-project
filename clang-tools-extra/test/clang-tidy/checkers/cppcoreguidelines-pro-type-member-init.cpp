@@ -516,3 +516,34 @@ struct PositiveDefaultConstructorOutOfDecl {
 
 PositiveDefaultConstructorOutOfDecl::PositiveDefaultConstructorOutOfDecl() = default;
 // CHECK-MESSAGES: :[[@LINE-1]]:1: warning: constructor does not initialize these fields: F
+
+union U1 {
+  U1() {}
+  // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: union constructor should initialize one of these fields: X, K, Z, Y
+  int X;
+  // CHECK-FIXES: int X{};
+  union {
+    int K;
+  };
+  union {
+    int Z;
+    int Y;
+  };
+};
+
+union U2 {
+  U2() {}
+  // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: union constructor should initialize one of these fields: B, C, A
+  struct {
+    int B;
+    // CHECK-FIXES: int B{};
+    union {
+      struct {
+        PositiveMultipleConstructors Value;
+      };
+      int C;
+      // CHECK-FIXES: int C{};
+    };
+  };
+  int A;
+};
