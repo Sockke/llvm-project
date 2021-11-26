@@ -83,6 +83,11 @@ New checks
   instances from the factory function to class template argument
   deduction (CTAD), in C++17 and higher.
 
+- New :doc:`bugprone-container-push-back
+  <clang-tidy/checks/bugprone-container-push-back>` check.
+
+  FIXME: add release notes.
+
 - New :doc:`bugprone-suspicious-memory-comparison
   <clang-tidy/checks/bugprone-suspicious-memory-comparison>` check.
 
