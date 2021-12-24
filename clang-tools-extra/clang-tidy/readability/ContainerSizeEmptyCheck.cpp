@@ -173,6 +173,26 @@ void ContainerSizeEmptyCheck::registerMatchers(MatchFinder *Finder) {
       this);
 }
 
+bool isStandardSmartPointerType(const QualType &QT) {
+  const Type *TheType = QT.getNonReferenceType().getTypePtrOrNull();
+  if (!TheType)
+    return false;
+
+  const CXXRecordDecl *RecordDecl = TheType->getAsCXXRecordDecl();
+  if (!RecordDecl)
+    return false;
+
+  const IdentifierInfo *ID = RecordDecl->getIdentifier();
+  if (!ID)
+    return false;
+
+  StringRef Name = ID->getName();
+  if (Name != "unique_ptr" && Name != "shared_ptr" && Name != "weak_ptr")
+    return false;
+
+  return RecordDecl->getDeclContext()->isStdNamespace();
+}
+
 void ContainerSizeEmptyCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *MemberCall = Result.Nodes.getNodeAs<Expr>("SizeCallExpr");
   const auto *MemberCallObject =
@@ -187,6 +207,16 @@ void ContainerSizeEmptyCheck::check(const MatchFinder::MatchResult &Result) {
       MemberCallObject
           ? MemberCallObject
           : (Pointee ? Pointee : Result.Nodes.getNodeAs<Expr>("STLObject"));
+  if (dyn_cast<CXXOperatorCallExpr>(E)) {
+    const auto *COCE = dyn_cast<CXXOperatorCallExpr>(E);
+    const Stmt *LastChild = E;
+    for (const auto *Child : COCE->children()) {
+      LastChild = Child;
+    }
+    const auto *DR = dyn_cast<Expr>(LastChild)->IgnoreParenImpCasts();
+    if (isStandardSmartPointerType(DR->getType()))
+      E = DR;
+  }
   FixItHint Hint;
   std::string ReplacementText = std::string(
       Lexer::getSourceText(CharSourceRange::getTokenRange(E->getSourceRange()),
@@ -194,7 +224,7 @@ void ContainerSizeEmptyCheck::check(const MatchFinder::MatchResult &Result) {
   if (isBinaryOrTernary(E) || isa<UnaryOperator>(E)) {
     ReplacementText = "(" + ReplacementText + ")";
   }
-  if (E->getType()->isPointerType())
+  if (E->getType()->isPointerType() || isStandardSmartPointerType(E->getType()))
     ReplacementText += "->empty()";
   else
     ReplacementText += ".empty()";

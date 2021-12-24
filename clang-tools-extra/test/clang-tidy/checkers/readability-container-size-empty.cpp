@@ -696,3 +696,48 @@ void instantiator() {
   instantiatedTemplateWithSizeCall<TypeWithSize>();
   instantiatedTemplateWithSizeCall<std::vector<int>>();
 }
+
+namespace std {
+template <typename T>
+struct shared_ptr {
+  template <typename T2 = T>
+  T2 &operator*() const;
+  template <typename T2 = T>
+  T2 *operator->() const;
+  T *get() const;
+  explicit operator bool() const noexcept;
+};
+} // namespace std
+
+std::shared_ptr<std::string> getSmartPointer() {
+  return std::shared_ptr<std::string>();
+}
+
+void SmartPointer() {
+  std::shared_ptr<std::string> it;
+  std::shared_ptr<std::string> it1;
+  if (it->size() == 0)
+    ;
+  // CHECK-MESSAGES: :[[@LINE-2]]:7: warning: the 'empty' method should be used
+  // CHECK-FIXES: {{^  }}if (it->empty()){{$}}
+  if ((*it).size() == 0)
+    ;
+  // CHECK-MESSAGES: :[[@LINE-2]]:7: warning: the 'empty' method should be used
+  // CHECK-FIXES: {{^  }}if (it->empty()){{$}}
+  if ((*it + *it1).size() == 0)
+    ;
+  // CHECK-MESSAGES: :[[@LINE-2]]:7: warning: the 'empty' method should be used
+  // CHECK-FIXES: {{^  }}if ((*it + *it1).empty()){{$}}
+  if (*it == "")
+    ;
+  // CHECK-MESSAGES: :[[@LINE-2]]:7: warning: the 'empty' method should be used
+  // CHECK-FIXES: {{^  }}if (it->empty()){{$}}
+  if (*it + *it1 == "")
+    ;
+  // CHECK-MESSAGES: :[[@LINE-2]]:7: warning: the 'empty' method should be used
+  // CHECK-FIXES: {{^  }}if ((*it + *it1).empty()){{$}}
+  if (*getSmartPointer() == "")
+    ;
+  // CHECK-MESSAGES: :[[@LINE-2]]:7: warning: the 'empty' method should be used
+  // CHECK-FIXES: {{^  }}if (getSmartPointer()->empty()){{$}}
+}
