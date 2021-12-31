@@ -116,6 +116,10 @@ Changes in existing checks
   <clang-tidy/checks/readability-suspicious-call-argument>` related to passing
   arguments that refer to program elements without a trivial identifier.
 
+- Fixed a crash in :doc:`readability-const-return-type
+  <clang-tidy/checks/readability-const-return-type>` when a pure virtual function
+  overrided has a const return type. Removed the fix for a virtual function.
+
 Removed checks
 ^^^^^^^^^^^^^^
 
