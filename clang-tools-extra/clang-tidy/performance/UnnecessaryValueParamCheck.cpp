@@ -51,6 +51,21 @@ bool hasLoopStmtAncestor(const DeclRefExpr &DeclRef, const Decl &Decl,
   return Matches.empty();
 }
 
+bool isTemplateTypeParmOfPrimaryTemplate(const FunctionDecl &Function,
+                                         int Index) {
+  // Check the specific parameter type of primary template whether is template
+  // type.
+  if (const auto *PrimaryTemplateInfo = Function.getPrimaryTemplate()) {
+    if (const auto *PrimaryTemplateFunction =
+            PrimaryTemplateInfo->getTemplatedDecl()) {
+      const auto *ParamInfo = PrimaryTemplateFunction->getParamDecl(Index);
+      if (ParamInfo && ParamInfo->getOriginalType()->isTemplateTypeParmType())
+        return true;
+    }
+  }
+  return false;
+}
+
 bool isExplicitTemplateSpecialization(const FunctionDecl &Function) {
   if (const auto *SpecializationInfo = Function.getTemplateSpecializationInfo())
     if (SpecializationInfo->getTemplateSpecializationKind() ==
@@ -146,15 +161,21 @@ void UnnecessaryValueParamCheck::check(const MatchFinder::MatchResult &Result) {
   // 2. the function is virtual as it might break overrides
   // 3. the function is referenced outside of a call expression within the
   //    compilation unit as the signature change could introduce build errors.
-  // 4. the function is an explicit template specialization.
+  // 4. the function is an explicit template specialization and the specific
+  //    parameter of primary template is template type.
   const auto *Method = llvm::dyn_cast<CXXMethodDecl>(Function);
+  bool IsExplicitTemplateSpecialization =
+      isExplicitTemplateSpecialization(*Function);
   if (Param->getBeginLoc().isMacroID() || (Method && Method->isVirtual()) ||
       isReferencedOutsideOfCallExpr(*Function, *Result.Context) ||
-      isExplicitTemplateSpecialization(*Function))
+      (IsExplicitTemplateSpecialization &&
+       isTemplateTypeParmOfPrimaryTemplate(*Function, Index)))
     return;
   for (const auto *FunctionDecl = Function; FunctionDecl != nullptr;
        FunctionDecl = FunctionDecl->getPreviousDecl()) {
     const auto &CurrentParam = *FunctionDecl->getParamDecl(Index);
+    if (IsExplicitTemplateSpecialization && Function != FunctionDecl)
+      continue;
     Diag << utils::fixit::changeVarDeclToReference(CurrentParam,
                                                    *Result.Context);
     // The parameter of each declaration needs to be checked individually as to

@@ -381,3 +381,24 @@ void templateFunction<ExpensiveToCopyType>(ExpensiveToCopyType E) {
   // CHECK-FIXES: void templateFunction<ExpensiveToCopyType>(ExpensiveToCopyType E) {
   E.constReference();
 }
+
+template <class T>
+T templateSpecializationFunction(ExpensiveToCopyType E) {
+  // CHECK-MESSAGES: [[@LINE-1]]:54: warning: the parameter 'E' is copied
+  // CHECK-FIXES: T templateSpecializationFunction(const ExpensiveToCopyType& E) {
+  return T();
+}
+
+template <>
+bool templateSpecializationFunction(ExpensiveToCopyType E) {
+  // CHECK-MESSAGES: [[@LINE-1]]:57: warning: the parameter 'E' is copied
+  // CHECK-FIXES: bool templateSpecializationFunction(const ExpensiveToCopyType& E) {
+  return true;
+}
+
+template <>
+int templateSpecializationFunction(ExpensiveToCopyType E) {
+  // CHECK-MESSAGES: [[@LINE-1]]:56: warning: the parameter 'E' is copied
+  // CHECK-FIXES: int templateSpecializationFunction(const ExpensiveToCopyType& E) {
+  return 0;
+}
