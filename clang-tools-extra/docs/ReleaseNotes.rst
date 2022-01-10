@@ -158,6 +158,9 @@ Changes in existing checks
   option to control whether to warn on narrowing integer to floating-point
   conversions.
 
+- Fixed a false positive in :doc:`readability-non-const-parameter
+  <clang-tidy/checks/readability-non-const-parameter>` when the parameter is referenced by an lvalue
+
 
 Removed checks
 ^^^^^^^^^^^^^^
