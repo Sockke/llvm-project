@@ -80,6 +80,7 @@ runClangTidy(clang::tidy::ClangTidyContext &Context,
              ArrayRef<std::string> InputFiles,
              llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> BaseFS,
              bool ApplyAnyFix, bool EnableCheckProfile = false,
+             bool EnableCompilerWarnings = false,
              llvm::StringRef StoreCheckProfile = StringRef());
 
 /// Controls what kind of fixes clang-tidy is allowed to apply.

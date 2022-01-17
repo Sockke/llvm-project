@@ -253,7 +253,8 @@ public:
                               DiagnosticsEngine *ExternalDiagEngine = nullptr,
                               bool RemoveIncompatibleErrors = true,
                               bool GetFixesFromNotes = false,
-                              bool EnableNolintBlocks = true);
+                              bool EnableNolintBlocks = true,
+                              bool EnableCompilerWarnings = false);
 
   // FIXME: The concept of converting between FixItHints and Replacements is
   // more generic and should be pulled out into a more useful Diagnostics
@@ -285,6 +286,7 @@ private:
   bool RemoveIncompatibleErrors;
   bool GetFixesFromNotes;
   bool EnableNolintBlocks;
+  bool EnableCompilerWarnings;
   std::vector<ClangTidyError> Errors;
   std::unique_ptr<llvm::Regex> HeaderFilter;
   bool LastErrorRelatesToUserCode;

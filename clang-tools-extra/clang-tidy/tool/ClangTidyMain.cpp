@@ -256,6 +256,11 @@ This option overrides the 'UseColor' option in
 )"),
                               cl::init(false), cl::cat(ClangTidyCategory));
 
+static cl::opt<bool> EnableCompilerWarnings("enable-compiler-warnings", cl::desc(R"(
+Emit the compiler warnings.
+)"),
+                                cl::init(false), cl::cat(ClangTidyCategory));
+
 namespace clang {
 namespace tidy {
 
@@ -490,9 +495,9 @@ int clangTidyMain(int argc, const char **argv) {
 
   ClangTidyContext Context(std::move(OwningOptionsProvider),
                            AllowEnablingAnalyzerAlphaCheckers);
-  std::vector<ClangTidyError> Errors =
-      runClangTidy(Context, OptionsParser->getCompilations(), PathList, BaseFS,
-                   FixNotes, EnableCheckProfile, ProfilePrefix);
+  std::vector<ClangTidyError> Errors = runClangTidy(
+      Context, OptionsParser->getCompilations(), PathList, BaseFS, FixNotes,
+      EnableCheckProfile, EnableCompilerWarnings, ProfilePrefix);
   bool FoundErrors = llvm::find_if(Errors, [](const ClangTidyError &E) {
                        return E.DiagLevel == ClangTidyError::Error;
                      }) != Errors.end();

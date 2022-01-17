@@ -275,19 +275,22 @@ std::string ClangTidyContext::getCheckName(unsigned DiagnosticID) const {
 ClangTidyDiagnosticConsumer::ClangTidyDiagnosticConsumer(
     ClangTidyContext &Ctx, DiagnosticsEngine *ExternalDiagEngine,
     bool RemoveIncompatibleErrors, bool GetFixesFromNotes,
-    bool EnableNolintBlocks)
+    bool EnableNolintBlocks, bool EnableCompilerWarnings)
     : Context(Ctx), ExternalDiagEngine(ExternalDiagEngine),
       RemoveIncompatibleErrors(RemoveIncompatibleErrors),
       GetFixesFromNotes(GetFixesFromNotes),
-      EnableNolintBlocks(EnableNolintBlocks), LastErrorRelatesToUserCode(false),
-      LastErrorPassesLineFilter(false), LastErrorWasIgnored(false) {}
+      EnableNolintBlocks(EnableNolintBlocks),
+      EnableCompilerWarnings(EnableCompilerWarnings),
+      LastErrorRelatesToUserCode(false), LastErrorPassesLineFilter(false),
+      LastErrorWasIgnored(false) {}
 
 void ClangTidyDiagnosticConsumer::finalizeLastError() {
   if (!Errors.empty()) {
     ClangTidyError &Error = Errors.back();
     if (Error.DiagnosticName == "clang-tidy-config") {
       // Never ignore these.
-    } else if (!Context.isCheckEnabled(Error.DiagnosticName) &&
+    } else if (!EnableCompilerWarnings &&
+               !Context.isCheckEnabled(Error.DiagnosticName) &&
                Error.DiagLevel != ClangTidyError::Error) {
       ++Context.Stats.ErrorsIgnoredCheckFilter;
       Errors.pop_back();

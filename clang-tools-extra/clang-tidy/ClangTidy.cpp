@@ -515,7 +515,7 @@ runClangTidy(clang::tidy::ClangTidyContext &Context,
              ArrayRef<std::string> InputFiles,
              llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> BaseFS,
              bool ApplyAnyFix, bool EnableCheckProfile,
-             llvm::StringRef StoreCheckProfile) {
+             bool EnableCompilerWarnings, llvm::StringRef StoreCheckProfile) {
   ClangTool Tool(Compilations, InputFiles,
                  std::make_shared<PCHContainerOperations>(), BaseFS);
 
@@ -542,7 +542,8 @@ runClangTidy(clang::tidy::ClangTidyContext &Context,
   Context.setEnableProfiling(EnableCheckProfile);
   Context.setProfileStoragePrefix(StoreCheckProfile);
 
-  ClangTidyDiagnosticConsumer DiagConsumer(Context, nullptr, true, ApplyAnyFix);
+  ClangTidyDiagnosticConsumer DiagConsumer(Context, nullptr, true, ApplyAnyFix,
+                                           true, EnableCompilerWarnings);
   DiagnosticsEngine DE(new DiagnosticIDs(), new DiagnosticOptions(),
                        &DiagConsumer, /*ShouldOwnClient=*/false);
   Context.setDiagnosticsEngine(&DE);
