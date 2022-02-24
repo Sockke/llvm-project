@@ -116,6 +116,10 @@ Changes in existing checks
   <clang-tidy/checks/readability-suspicious-call-argument>` related to passing
   arguments that refer to program elements without a trivial identifier.
 
+- Fixed a crash in :doc:`performance-unnecessary-value-param
+  <clang-tidy/checks/readability-suspicious-call-argument>` when the specialization
+  template has an unnecessary value paramter. Removed the fix for a template.
+
 Removed checks
 ^^^^^^^^^^^^^^
 
