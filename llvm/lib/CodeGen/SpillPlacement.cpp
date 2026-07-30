@@ -28,6 +28,7 @@
 
 #include "llvm/CodeGen/SpillPlacement.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/EdgeBundles.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
@@ -38,6 +39,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <utility>
 
 using namespace llvm;
@@ -87,6 +89,13 @@ struct SpillPlacement::Node {
   /// bundles. The weights are all positive block frequencies.
   LinkVector Links;
 
+  /// Optional index from bundle number to Links index.
+  ///
+  /// Links remains the canonical storage so iteration order stays unchanged.
+  /// The index is created only for high-degree nodes where repeated linear
+  /// scans in addLink() become expensive.
+  std::unique_ptr<DenseMap<unsigned, unsigned>> LinkIndex;
+
   /// SumLinkWeights - Cached sum of the weights of all links + ThresHold.
   BlockFrequency SumLinkWeights;
 
@@ -112,12 +121,27 @@ struct SpillPlacement::Node {
     Value = 0;
     SumLinkWeights = Threshold;
     Links.clear();
+    if (LinkIndex)
+      LinkIndex->clear();
   }
 
   /// addLink - Add a link to bundle b with weight w.
   void addLink(unsigned b, BlockFrequency w) {
+    constexpr unsigned LinkIndexThreshold = 32;
+
     // Update cached sum.
     SumLinkWeights += w;
+
+    if (LinkIndex) {
+      auto It = LinkIndex->find(b);
+      if (It != LinkIndex->end()) {
+        Links[It->second].first += w;
+        return;
+      }
+      LinkIndex->insert(std::make_pair(b, Links.size()));
+      Links.push_back(std::make_pair(w, b));
+      return;
+    }
 
     // There can be multiple links to the same bundle, add them up.
     for (std::pair<BlockFrequency, unsigned> &L : Links)
@@ -127,6 +151,13 @@ struct SpillPlacement::Node {
       }
     // This must be the first link to b.
     Links.push_back(std::make_pair(w, b));
+
+    if (Links.size() == LinkIndexThreshold) {
+      LinkIndex = std::make_unique<DenseMap<unsigned, unsigned>>();
+      LinkIndex->reserve(Links.size());
+      for (unsigned I = 0, E = Links.size(); I != E; ++I)
+        LinkIndex->insert(std::make_pair(Links[I].second, I));
+    }
   }
 
   /// addBias - Bias this node.
