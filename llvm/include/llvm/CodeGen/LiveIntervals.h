@@ -20,6 +20,7 @@
 #define LLVM_CODEGEN_LIVEINTERVALS_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/LiveInterval.h"
@@ -41,7 +42,6 @@ namespace llvm {
 
 LLVM_ABI extern cl::opt<bool> UseSegmentSetForPhysRegs;
 
-class BitVector;
 class MachineBlockFrequencyInfo;
 class MachineDominatorTree;
 class MachineFunction;
@@ -86,6 +86,9 @@ class LiveIntervals {
   /// improve locality when searching in RegMaskSlots.
   /// Also see the comment in LiveInterval::find().
   SmallVector<const uint32_t *, 8> RegMaskBits;
+
+  /// The registers preserved by every register mask in the function.
+  BitVector RegMaskIntersection;
 
   /// For each basic block number, keep (begin, size) pairs indexing into the
   /// RegMaskSlots and RegMaskBits arrays.
