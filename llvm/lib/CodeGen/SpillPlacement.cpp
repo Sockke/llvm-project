@@ -28,6 +28,7 @@
 
 #include "llvm/CodeGen/SpillPlacement.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/EdgeBundles.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
@@ -114,19 +115,20 @@ struct SpillPlacement::Node {
     Links.clear();
   }
 
-  /// addLink - Add a link to bundle b with weight w.
-  void addLink(unsigned b, BlockFrequency w) {
-    // Update cached sum.
+  /// appendLink - Add the first link to bundle b with weight w.
+  unsigned appendLink(unsigned b, BlockFrequency w) {
     SumLinkWeights += w;
-
-    // There can be multiple links to the same bundle, add them up.
-    for (std::pair<BlockFrequency, unsigned> &L : Links)
-      if (L.second == b) {
-        L.first += w;
-        return;
-      }
-    // This must be the first link to b.
+    unsigned Index = static_cast<unsigned>(Links.size());
     Links.push_back(std::make_pair(w, b));
+    return Index;
+  }
+
+  /// addLinkWeight - Add weight to an existing link at Index.
+  void addLinkWeight(unsigned Index, unsigned b, BlockFrequency w) {
+    assert(Index < Links.size() && Links[Index].second == b &&
+           "Cached link index is invalid");
+    SumLinkWeights += w;
+    Links[Index].first += w;
   }
 
   /// addBias - Bias this node.
@@ -189,6 +191,66 @@ struct SpillPlacement::Node {
   }
 };
 
+/// Cache the CFG-only mapping from blocks to link endpoints. Link vector
+/// indices are tagged with a query number because Node::Links is rebuilt for
+/// every spill placement query.
+struct SpillPlacement::LinkCache {
+  static constexpr unsigned UnmappedEdge = ~0u;
+  static constexpr unsigned SelfLoop = UnmappedEdge - 1;
+
+  struct Edge {
+    unsigned FirstBundle;
+    unsigned SecondBundle;
+    uint64_t LastQuery = 0;
+    unsigned FirstLinkIndex = 0;
+    unsigned SecondLinkIndex = 0;
+  };
+
+  SmallVector<unsigned, 8> BlockToEdge;
+  BitVector ReversedBlocks;
+  DenseMap<uint64_t, unsigned> EdgeIDs;
+  SmallVector<Edge, 8> Edges;
+  uint64_t CurrentQuery = 1;
+
+  explicit LinkCache(unsigned NumBlocks)
+      : BlockToEdge(NumBlocks, UnmappedEdge), ReversedBlocks(NumBlocks) {}
+
+  void beginQuery() {
+    if (++CurrentQuery)
+      return;
+
+    // This is practically unreachable, but stale indices must not become valid
+    // again if the query counter wraps.
+    for (Edge &E : Edges)
+      E.LastQuery = 0;
+    CurrentQuery = 1;
+  }
+
+  unsigned getOrCreateEdge(unsigned Block, unsigned InBundle,
+                           unsigned OutBundle) {
+    assert(Block < BlockToEdge.size() && "Invalid block number");
+    unsigned &EdgeIndex = BlockToEdge[Block];
+    if (EdgeIndex != UnmappedEdge)
+      return EdgeIndex;
+
+    if (InBundle == OutBundle)
+      return EdgeIndex = SelfLoop;
+
+    unsigned FirstBundle = std::min(InBundle, OutBundle);
+    unsigned SecondBundle = std::max(InBundle, OutBundle);
+    uint64_t Key = (uint64_t(FirstBundle) << 32) | SecondBundle;
+    auto [It, Inserted] =
+        EdgeIDs.try_emplace(Key, static_cast<unsigned>(Edges.size()));
+    if (Inserted)
+      Edges.push_back({FirstBundle, SecondBundle});
+
+    EdgeIndex = It->second;
+    if (InBundle != FirstBundle)
+      ReversedBlocks.set(Block);
+    return EdgeIndex;
+  }
+};
+
 bool SpillPlacementWrapperLegacy::runOnMachineFunction(MachineFunction &MF) {
   auto *Bundles = &getAnalysis<EdgeBundlesWrapperLegacy>().getEdgeBundles();
   auto *MBFI = &getAnalysis<MachineBlockFrequencyInfoWrapperPass>().getMBFI();
@@ -226,6 +288,7 @@ SpillPlacement::SpillPlacement(SpillPlacement &&) = default;
 
 void SpillPlacement::releaseMemory() {
   nodes.reset();
+  linkCache.reset();
   TodoList.clear();
 }
 
@@ -236,6 +299,7 @@ void SpillPlacement::run(MachineFunction &mf, EdgeBundles *Bundles,
   this->MBFI = MBFI;
 
   assert(!nodes && "Leaking node array");
+  assert(!linkCache && "Leaking link cache");
   nodes.reset(new Node[bundles->getNumBundles()]);
   TodoList.clear();
   TodoList.setUniverse(bundles->getNumBundles());
@@ -325,18 +389,47 @@ void SpillPlacement::addPrefSpill(ArrayRef<unsigned> Blocks, bool Strong) {
 }
 
 void SpillPlacement::addLinks(ArrayRef<unsigned> Links) {
+  if (Links.empty())
+    return;
+
+  if (!linkCache)
+    linkCache = std::make_unique<LinkCache>(MF->getNumBlockIDs());
+
+  LinkCache &Cache = *linkCache;
   for (unsigned Number : Links) {
-    unsigned ib = bundles->getBundle(Number, false);
-    unsigned ob = bundles->getBundle(Number, true);
+    assert(Number < Cache.BlockToEdge.size() && "Invalid block number");
+    unsigned EdgeIndex = Cache.BlockToEdge[Number];
+    if (EdgeIndex == LinkCache::UnmappedEdge) {
+      unsigned ib = bundles->getBundle(Number, false);
+      unsigned ob = bundles->getBundle(Number, true);
+      EdgeIndex = Cache.getOrCreateEdge(Number, ib, ob);
+    }
 
     // Ignore self-loops.
-    if (ib == ob)
+    if (EdgeIndex == LinkCache::SelfLoop)
       continue;
+
+    LinkCache::Edge &Edge = Cache.Edges[EdgeIndex];
+    bool Reversed = Cache.ReversedBlocks.test(Number);
+    unsigned ib = Reversed ? Edge.SecondBundle : Edge.FirstBundle;
+    unsigned ob = Reversed ? Edge.FirstBundle : Edge.SecondBundle;
     activate(ib);
     activate(ob);
+
     BlockFrequency Freq = BlockFrequencies[Number];
-    nodes[ib].addLink(ob, Freq);
-    nodes[ob].addLink(ib, Freq);
+    unsigned &IBLinkIndex =
+        Reversed ? Edge.SecondLinkIndex : Edge.FirstLinkIndex;
+    unsigned &OBLinkIndex =
+        Reversed ? Edge.FirstLinkIndex : Edge.SecondLinkIndex;
+    if (Edge.LastQuery != Cache.CurrentQuery) {
+      Edge.LastQuery = Cache.CurrentQuery;
+      IBLinkIndex = nodes[ib].appendLink(ob, Freq);
+      OBLinkIndex = nodes[ob].appendLink(ib, Freq);
+      continue;
+    }
+
+    nodes[ib].addLinkWeight(IBLinkIndex, ob, Freq);
+    nodes[ob].addLinkWeight(OBLinkIndex, ib, Freq);
   }
 }
 
@@ -383,6 +476,8 @@ void SpillPlacement::iterate() {
 }
 
 void SpillPlacement::prepare(BitVector &RegBundles) {
+  if (linkCache)
+    linkCache->beginQuery();
   RecentPositive.clear();
   TodoList.clear();
   // Reuse RegBundles as our ActiveNodes vector.

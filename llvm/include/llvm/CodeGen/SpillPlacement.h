@@ -46,6 +46,7 @@ class SpillPlacement {
   friend class SpillPlacementWrapperLegacy;
   friend class SpillPlacementAnalysis;
 
+  struct LinkCache;
   struct Node;
 
   const MachineFunction *MF = nullptr;
@@ -53,6 +54,7 @@ class SpillPlacement {
   const MachineBlockFrequencyInfo *MBFI = nullptr;
 
   std::unique_ptr<Node[]> nodes;
+  std::unique_ptr<LinkCache> linkCache;
 
   // Nodes that are active in the current computation. Owned by the prepare()
   // caller.
