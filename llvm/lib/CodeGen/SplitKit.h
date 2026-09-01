@@ -163,6 +163,13 @@ private:
   /// IV, where it defs a variable in the latch.
   bool LooksLikeLoopIV = false;
 
+  /// Cached block-start insertion checks for the current analyzed interval.
+  /// Splitting can change a block's first insertion point, so entries from a
+  /// previous interval must not be reused.
+  unsigned BlockStartInsertCacheEpoch = 0;
+  SmallVector<unsigned, 0> BlockStartInsertCacheEpochs;
+  BitVector BlockStartInsertAllowed;
+
   // Sumarize statistics by counting instructions using CurLI.
   void analyzeUses();
 
@@ -247,6 +254,9 @@ public:
   SlotIndex getFirstSplitPoint(unsigned Num) {
     return IPA.getFirstInsertPoint(*MF.getBlockNumbered(Num));
   }
+
+  /// Return whether spill/split code can be inserted at the start of MBB Num.
+  bool canInsertAtMBBStart(unsigned Num);
 };
 
 /// SplitEditor - Edit machine code and LiveIntervals for live range
